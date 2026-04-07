@@ -2,21 +2,20 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# --------------------------------------------------
-# PAGE CONFIG
-# --------------------------------------------------
+# ---------------------------------------
+# PAGE SETUP
+# ---------------------------------------
 
 st.set_page_config(
     page_title="Amazon Smart Buyer Dashboard",
-    page_icon="📊",
     layout="wide"
 )
 
 st.title("Amazon Smart Buyer Dashboard")
 
-# --------------------------------------------------
+# ---------------------------------------
 # LOAD DATA
-# --------------------------------------------------
+# ---------------------------------------
 
 @st.cache_data
 def load_data():
@@ -25,180 +24,138 @@ def load_data():
 
 df = load_data()
 
-# --------------------------------------------------
+# ---------------------------------------
 # SIDEBAR FILTERS
-# --------------------------------------------------
+# ---------------------------------------
 
 st.sidebar.header("Filters")
 
-category_filter = st.sidebar.multiselect(
-    "Category",
-    options=df["Category"].dropna().unique(),
-    default=df["Category"].dropna().unique()
+brand_filter = st.sidebar.multiselect(
+    "Brand",
+    options=df["brand"].dropna().unique(),
+    default=df["brand"].dropna().unique()
 )
 
 subcategory_filter = st.sidebar.multiselect(
     "Subcategory",
-    options=df["Subcategory"].dropna().unique(),
-    default=df["Subcategory"].dropna().unique()
+    options=df["subcategory"].dropna().unique(),
+    default=df["subcategory"].dropna().unique()
 )
 
 quarter_filter = st.sidebar.multiselect(
     "Quarter",
-    options=df["Quarter"].dropna().unique(),
-    default=df["Quarter"].dropna().unique()
+    options=df["quarter"].dropna().unique(),
+    default=df["quarter"].dropna().unique()
 )
 
-filtered_df = df[
-    (df["Category"].isin(category_filter)) &
-    (df["Subcategory"].isin(subcategory_filter)) &
-    (df["Quarter"].isin(quarter_filter))
+filtered = df[
+    (df["brand"].isin(brand_filter)) &
+    (df["subcategory"].isin(subcategory_filter)) &
+    (df["quarter"].isin(quarter_filter))
 ]
 
-# --------------------------------------------------
+# ---------------------------------------
 # KPI METRICS
-# --------------------------------------------------
+# ---------------------------------------
 
 st.subheader("Portfolio Overview")
 
 col1, col2, col3, col4 = st.columns(4)
 
-col1.metric(
-    "Total Products",
-    filtered_df["ASIN"].nunique()
-)
+col1.metric("Total Products", filtered["asin"].nunique())
 
 col2.metric(
     "Average Margin %",
-    round(filtered_df["Margin_Percent"].mean(), 2)
+    round(filtered["MarginPercent"].mean(),2)
 )
 
 col3.metric(
-    "High OOS Risk",
-    (filtered_df["OOS_Risk_Class"] == "High").sum()
+    "Avg Competition Score",
+    round(filtered["CII_Score"].mean(),2)
 )
 
 col4.metric(
-    "High Competition",
-    (filtered_df["Competition_Level"] == "High").sum()
+    "Avg Buy Box Price",
+    round(filtered["buy_box_current"].mean(),2)
 )
 
-# --------------------------------------------------
+# ---------------------------------------
 # COMPETITION HEATMAP
-# --------------------------------------------------
+# ---------------------------------------
 
-st.subheader("Competitive Intensity Heatmap")
+st.subheader("Competitive Intensity by Subcategory")
 
 heatmap = px.density_heatmap(
-    filtered_df,
-    x="Quarter",
-    y="Subcategory",
-    z="Competition_Score",
+    filtered,
+    x="quarter",
+    y="subcategory",
+    z="CII_Score",
     histfunc="avg"
 )
 
 st.plotly_chart(heatmap, use_container_width=True)
 
-# --------------------------------------------------
-# PORTFOLIO OPPORTUNITY MATRIX
-# --------------------------------------------------
+# ---------------------------------------
+# DEMAND DISTRIBUTION
+# ---------------------------------------
 
-st.subheader("Portfolio Opportunity Matrix")
+st.subheader("Demand Tier Distribution")
+
+demand_chart = px.histogram(
+    filtered,
+    x="Demand_Tier"
+)
+
+st.plotly_chart(demand_chart, use_container_width=True)
+
+# ---------------------------------------
+# MARGIN DISTRIBUTION
+# ---------------------------------------
+
+st.subheader("Margin Distribution")
+
+margin_chart = px.histogram(
+    filtered,
+    x="MarginPercent",
+    nbins=40
+)
+
+st.plotly_chart(margin_chart, use_container_width=True)
+
+# ---------------------------------------
+# MOMENTUM VS COMPETITION
+# ---------------------------------------
+
+st.subheader("Category Momentum vs Competition")
 
 scatter = px.scatter(
-    filtered_df,
-    x="Competition_Score",
-    y="Demand_Score",
-    size="Margin_Percent",
-    color="Price_Momentum",
-    hover_data=["ASIN", "Subcategory"]
+    filtered,
+    x="CII_Score",
+    y="CategoryMomentum",
+    size="MarginPercent",
+    color="Demand_Tier",
+    hover_data=["asin","brand","subcategory"]
 )
 
 st.plotly_chart(scatter, use_container_width=True)
 
-# --------------------------------------------------
-# MARGIN DISTRIBUTION
-# --------------------------------------------------
-
-st.subheader("Margin Distribution")
-
-margin_hist = px.histogram(
-    filtered_df,
-    x="Margin_Percent",
-    nbins=40
-)
-
-st.plotly_chart(margin_hist, use_container_width=True)
-
-# --------------------------------------------------
-# OOS RISK DISTRIBUTION
-# --------------------------------------------------
-
-st.subheader("Out-of-Stock Risk Distribution")
-
-oos_counts = filtered_df["OOS_Risk_Class"].value_counts().reset_index()
-oos_counts.columns = ["Risk_Level", "Count"]
-
-oos_chart = px.bar(
-    oos_counts,
-    x="Risk_Level",
-    y="Count"
-)
-
-st.plotly_chart(oos_chart, use_container_width=True)
-
-# --------------------------------------------------
-# SMART BUYER SCORE
-# --------------------------------------------------
-
-if {"Demand_Score","Price_Momentum","Competition_Score","Promo_Score"}.issubset(filtered_df.columns):
-
-    filtered_df["SmartBuyerScore"] = (
-        0.35 * filtered_df["Demand_Score"] +
-        0.25 * filtered_df["Price_Momentum"] +
-        0.20 * filtered_df["Competition_Score"] +
-        0.10 * filtered_df["Promo_Score"]
-    )
-
-    st.subheader("Top Products to Invest In")
-
-    top_products = filtered_df.sort_values(
-        by="SmartBuyerScore",
-        ascending=False
-    ).head(10)
-
-    st.dataframe(
-        top_products[
-            [
-                "ASIN",
-                "Subcategory",
-                "Demand_Score",
-                "Competition_Score",
-                "Price_Momentum",
-                "Margin_Percent",
-                "SmartBuyerScore"
-            ]
-        ],
-        use_container_width=True
-    )
-
-# --------------------------------------------------
-# PRODUCT EXPLORER
-# --------------------------------------------------
+# ---------------------------------------
+# PRODUCT TABLE
+# ---------------------------------------
 
 st.subheader("Product Explorer")
 
 st.dataframe(
-    filtered_df[
+    filtered[
         [
-            "ASIN",
-            "Category",
-            "Subcategory",
-            "Demand_Score",
-            "Competition_Score",
-            "Price_Momentum",
-            "Margin_Percent",
-            "OOS_Risk_Class"
+            "asin",
+            "title",
+            "brand",
+            "subcategory",
+            "buy_box_current",
+            "MarginPercent",
+            "CII_Score",
+            "Demand_Tier"
         ]
     ],
     use_container_width=True
