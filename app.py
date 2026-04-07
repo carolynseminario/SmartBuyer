@@ -2,20 +2,13 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# ---------------------------------------
-# PAGE SETUP
-# ---------------------------------------
+st.set_page_config(page_title="Smart Buyer Dashboard", layout="wide")
 
-st.set_page_config(
-    page_title="Amazon Smart Buyer Dashboard",
-    layout="wide"
-)
+st.title("Amazon Smart Buyer Analytics Dashboard")
 
-st.title("Amazon Smart Buyer Dashboard")
-
-# ---------------------------------------
+# ----------------------------
 # LOAD DATA
-# ---------------------------------------
+# ----------------------------
 
 @st.cache_data
 def load_data():
@@ -24,124 +17,179 @@ def load_data():
 
 df = load_data()
 
-# ---------------------------------------
+# ----------------------------
 # SIDEBAR FILTERS
-# ---------------------------------------
+# ----------------------------
 
 st.sidebar.header("Filters")
 
-brand_filter = st.sidebar.multiselect(
+brand = st.sidebar.multiselect(
     "Brand",
-    options=df["brand"].dropna().unique(),
+    df["brand"].dropna().unique(),
     default=df["brand"].dropna().unique()
 )
 
-subcategory_filter = st.sidebar.multiselect(
+subcategory = st.sidebar.multiselect(
     "Subcategory",
-    options=df["subcategory"].dropna().unique(),
+    df["subcategory"].dropna().unique(),
     default=df["subcategory"].dropna().unique()
 )
 
-quarter_filter = st.sidebar.multiselect(
-    "Quarter",
-    options=df["quarter"].dropna().unique(),
-    default=df["quarter"].dropna().unique()
-)
-
 filtered = df[
-    (df["brand"].isin(brand_filter)) &
-    (df["subcategory"].isin(subcategory_filter)) &
-    (df["quarter"].isin(quarter_filter))
+    (df["brand"].isin(brand)) &
+    (df["subcategory"].isin(subcategory))
 ]
 
-# ---------------------------------------
-# KPI METRICS
-# ---------------------------------------
-
-st.subheader("Portfolio Overview")
-
-col1, col2, col3, col4 = st.columns(4)
-
-col1.metric("Total Products", filtered["asin"].nunique())
-
-col2.metric(
-    "Average Margin %",
-    round(filtered["MarginPercent"].mean(),2)
-)
-
-col3.metric(
-    "Avg Competition Score",
-    round(filtered["CII_Score"].mean(),2)
-)
-
-col4.metric(
-    "Avg Buy Box Price",
-    round(filtered["buy_box_current"].mean(),2)
-)
-
-# ---------------------------------------
-# COMPETITION HEATMAP
-# ---------------------------------------
-
-st.subheader("Competitive Intensity by Subcategory")
-
-heatmap = px.density_heatmap(
-    filtered,
-    x="quarter",
-    y="subcategory",
-    z="CII_Score",
-    histfunc="avg"
-)
-
-st.plotly_chart(heatmap, use_container_width=True)
-
-# ---------------------------------------
-# DEMAND DISTRIBUTION
-# ---------------------------------------
-
-st.subheader("Demand Tier Distribution")
-
-demand_chart = px.histogram(
-    filtered,
-    x="Demand_Tier"
-)
-
-st.plotly_chart(demand_chart, use_container_width=True)
-
-# ---------------------------------------
-# MARGIN DISTRIBUTION
-# ---------------------------------------
+# ==================================================
+# 1️⃣ Margin Distribution
+# ==================================================
 
 st.subheader("Margin Distribution")
 
-margin_chart = px.histogram(
+margin_fig = px.histogram(
     filtered,
     x="MarginPercent",
+    nbins=40,
+)
+
+margin_fig.update_traces(marker_color="teal")
+
+st.plotly_chart(margin_fig, use_container_width=True)
+
+# ==================================================
+# 2️⃣ Category Momentum Distribution
+# ==================================================
+
+st.subheader("Category Momentum Distribution")
+
+momentum_fig = px.histogram(
+    filtered,
+    x="CategoryMomentum",
     nbins=40
 )
 
-st.plotly_chart(margin_chart, use_container_width=True)
+momentum_fig.update_traces(marker_color="green")
 
-# ---------------------------------------
-# MOMENTUM VS COMPETITION
-# ---------------------------------------
+st.plotly_chart(momentum_fig, use_container_width=True)
 
-st.subheader("Category Momentum vs Competition")
+# ==================================================
+# 3️⃣ Momentum vs Drops Per Day
+# ==================================================
 
-scatter = px.scatter(
+st.subheader("Momentum vs Drops Per Day")
+
+scatter_fig = px.scatter(
     filtered,
-    x="CII_Score",
+    x="CatDropsPerDay",
     y="CategoryMomentum",
-    size="MarginPercent",
     color="Demand_Tier",
-    hover_data=["asin","brand","subcategory"]
+    hover_data=["subcategory","brand"],
 )
 
-st.plotly_chart(scatter, use_container_width=True)
+st.plotly_chart(scatter_fig, use_container_width=True)
 
-# ---------------------------------------
+# ==================================================
+# 4️⃣ Demand Tier Confusion Matrix
+# ==================================================
+
+st.subheader("Demand Tier Confusion Matrix")
+
+# Only works if these columns exist
+if {"target_tier","pred_class"}.issubset(filtered.columns):
+
+    confusion = pd.crosstab(
+        filtered["target_tier"],
+        filtered["pred_class"]
+    )
+
+    heatmap = px.imshow(
+        confusion,
+        text_auto=True,
+        color_continuous_scale="Blues"
+    )
+
+    st.plotly_chart(heatmap, use_container_width=True)
+
+else:
+    st.info("Confusion matrix requires 'target_tier' and 'pred_class' columns.")
+
+# ==================================================
+# 5️⃣ OOS Rate by Brand
+# ==================================================
+
+st.subheader("Out-of-Stock Rate by Brand")
+
+if "oos_continuous" in filtered.columns:
+
+    oos_brand = (
+        filtered.groupby("brand")["oos_continuous"]
+        .mean()
+        .reset_index()
+        .sort_values("oos_continuous", ascending=False)
+    )
+
+    oos_chart = px.bar(
+        oos_brand,
+        x="oos_continuous",
+        y="brand",
+        orientation="h",
+        color="oos_continuous"
+    )
+
+    st.plotly_chart(oos_chart, use_container_width=True)
+
+else:
+    st.info("OOS analysis requires 'oos_continuous' column.")
+
+# ==================================================
+# 6️⃣ OOS Feature Importance
+# ==================================================
+
+st.subheader("OOS Feature Importance")
+
+try:
+
+    importance = pd.read_csv("data/oos_feature_importance.csv")
+
+    imp_chart = px.bar(
+        importance.sort_values("importance"),
+        x="importance",
+        y="feature",
+        orientation="h"
+    )
+
+    imp_chart.update_traces(marker_color="#4c78a8")
+
+    st.plotly_chart(imp_chart, use_container_width=True)
+
+except:
+    st.info("Upload 'oos_feature_importance.csv' to data folder.")
+
+# ==================================================
+# 7️⃣ Forecasted Competitive Intensity
+# ==================================================
+
+st.subheader("Forecasted Competitive Intensity")
+
+try:
+
+    forecast = pd.read_csv("data/cii_forecast_2026.csv")
+
+    forecast_chart = px.line(
+        forecast,
+        x="quarter",
+        y="CII_Score",
+        color="subcategory"
+    )
+
+    st.plotly_chart(forecast_chart, use_container_width=True)
+
+except:
+    st.info("Upload 'cii_forecast_2026.csv' to data folder.")
+
+# ==================================================
 # PRODUCT TABLE
-# ---------------------------------------
+# ==================================================
 
 st.subheader("Product Explorer")
 
@@ -152,11 +200,11 @@ st.dataframe(
             "title",
             "brand",
             "subcategory",
-            "buy_box_current",
             "MarginPercent",
-            "CII_Score",
-            "Demand_Tier"
+            "CategoryMomentum",
+            "CatDropsPerDay",
+            "Demand_Tier",
+            "CII_Score"
         ]
-    ],
-    use_container_width=True
+    ]
 )
